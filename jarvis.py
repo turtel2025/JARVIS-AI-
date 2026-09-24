@@ -99,22 +99,40 @@ def main() -> None:
     client = OpenAI(api_key=api_key, base_url=base_url)
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    print("\nJARVIS: Good evening, sir. I am at your service.")
+    # ASCII art JARVIS logo
+    jarvis_logo = """
+    +--------------------------------------------------------------+
+    |                                                              |
+    |     J.A.R.V.I.S. - Just A Rather Very Intelligent System     |
+    |                                                              |
+    |                 Your AI Butler at Service                    |
+    |                                                              |
+    +--------------------------------------------------------------+
+    """
+    print(jarvis_logo)
+    print("\n\nJARVIS:\nGood evening, sir. I am at your service.\n")
 
     while True:
         try:
             # Put the "Sir:" label on its own line, then read the message.
             print("\nSir:")
             user = input().strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nJARVIS: Very good, sir. I shall standby.")
-            break
+        except KeyboardInterrupt:
+            # Ctrl+C during input awaiting — do nothing, just ask again.
+            continue
 
         if not user:
             continue
 
         if user.lower() in ("exit", "quit", "good night", "shutdown", "stand down"):
             print("\nJARVIS: As you wish, sir. Good night.")
+            # Hold the line so Sir can actually see the farewell before the
+            # console closes. Ctrl+C exits immediately; closed stdin (EOF)
+            # is treated the same way.
+            try:
+                input("\nPress Enter to close...")
+            except (EOFError, KeyboardInterrupt):
+                pass
             break
 
         messages.append({"role": "user", "content": user})
@@ -122,6 +140,7 @@ def main() -> None:
         print("\nJARVIS:")
         reply = ""
         started = False
+        interrupted = False
         try:
             for chunk in client.chat.completions.create(
                 model="auto",
@@ -142,9 +161,17 @@ def main() -> None:
                         continue
                 print(delta, end="", flush=True)
                 reply += delta
+        except KeyboardInterrupt:
+            # Ctrl+C pressed during streaming — cancel this request.
+            interrupted = True
+            messages.pop()  # discard the interrupted user message
         except Exception as exc:  # noqa: BLE001 — surface any API error in character
             print(f"\nJARVIS: I'm afraid I've run into a difficulty, sir: {exc}")
             messages.pop()  # drop the failed user turn so the conversation stays clean
+            continue
+
+        if interrupted:
+            print("\nJARVIS: Interrupted, sir. I am ready for your next instruction.")
             continue
 
         print()
