@@ -13,8 +13,51 @@ Credentials are read from environment variables:
 import os
 import re
 import sys
+import threading
+import time
 
 from openai import OpenAI
+
+# --- ANSI color codes ------------------------------------------------------
+BLUE = "\033[94m"
+RED = "\033[91m"
+GOLD = "\033[93m"
+WHITE = "\033[97m"
+RESET = "\033[0m"
+
+# --- Status spinner --------------------------------------------------------
+_SPINNER = ["|", "/", "-", "\\"]
+_stdout_lock = threading.Lock()
+
+class Spinner:
+    """A simple ASCII spinner shown while waiting for the API."""
+
+    def __init__(self, message="JARVIS is thinking..."):
+        self.message = message
+        self._running = False
+
+    def _spin(self):
+        idx = 0
+        while self._running:
+            with _stdout_lock:
+                sys.stdout.write(f"\r{BLUE}{_SPINNER[idx]}{RESET} {self.message}")
+                sys.stdout.flush()
+            idx = (idx + 1) % len(_SPINNER)
+            time.sleep(0.1)
+
+    def start(self):
+        self._running = True
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        if hasattr(self, "_thread"):
+            self._thread.join(timeout=0.2)
+        # Clear the spinner line
+        with _stdout_lock:
+            sys.stdout.write("\r" + " " * (len(self.message) + 4) + "\r")
+            sys.stdout.flush()
 
 SYSTEM_PROMPT = """You are JARVIS, Just A Rather Very Intelligent System — the AI butler who serves Sir.
 
@@ -89,8 +132,8 @@ def main() -> None:
     base_url = os.environ.get("FREELLMAPI_BASE_URL")
 
     if not api_key or not base_url:
-        print(
-            "JARVIS: I'm afraid I'm missing my credentials, sir. "
+        print(f"{BLUE}JARVIS:{RESET}") 
+        print(f"I'm afraid I'm missing my credentials, sir. "
             "Please set UNIFIED_API_KEY and FREELLMAPI_BASE_URL in your environment.",
             file=sys.stderr,
         )
@@ -110,12 +153,13 @@ def main() -> None:
     +--------------------------------------------------------------+
     """
     print(jarvis_logo)
-    print("\n\nJARVIS:\nGood evening, sir. I am at your service.\n")
+    print(f"{BLUE}JARVIS:{RESET}")
+    print("Good evening, sir. I am at your service.")
 
     while True:
         try:
             # Put the "Sir:" label on its own line, then read the message.
-            print("\nSir:")
+            print(f"\n{RED}Sir:{RESET}")
             user = input().strip()
         except KeyboardInterrupt:
             # Ctrl+C during input awaiting — do nothing, just ask again.
@@ -125,10 +169,10 @@ def main() -> None:
             continue
 
         if user.lower() in ("exit", "quit", "good night", "shutdown", "stand down"):
-            print("\nJARVIS: As you wish, sir. Good night.")
+            print(f"\n{BLUE}JARVIS:{RESET}")
+            print("As you wish, sir. Good night.")
             # Hold the line so Sir can actually see the farewell before the
-            # console closes. Ctrl+C exits immediately; closed stdin (EOF)
-            # is treated the same way.
+            # console closes. Ctrl+C or EOF both dismiss the prompt.
             try:
                 input("\nPress Enter to close...")
             except (EOFError, KeyboardInterrupt):
@@ -137,7 +181,13 @@ def main() -> None:
 
         messages.append({"role": "user", "content": user})
 
-        print("\nJARVIS:")
+        # Show a spinner while waiting for the first chunk from the API.
+        # The "JARVIS:" label is printed only after the spinner stops,
+        # so the two don't overwrite each other.
+        print()
+        spinner = Spinner()
+        spinner.start()
+
         reply = ""
         started = False
         interrupted = False
@@ -157,21 +207,28 @@ def main() -> None:
                     delta = delta.lstrip()
                     if delta:
                         started = True
+                        spinner.stop()
+                        print(f"{BLUE}JARVIS:{RESET}",flush=True)
                     else:
                         continue
                 print(delta, end="", flush=True)
+                time.sleep(0.015)  # typewriter effect
                 reply += delta
         except KeyboardInterrupt:
             # Ctrl+C pressed during streaming — cancel this request.
+            spinner.stop()
             interrupted = True
             messages.pop()  # discard the interrupted user message
         except Exception as exc:  # noqa: BLE001 — surface any API error in character
-            print(f"\nJARVIS: I'm afraid I've run into a difficulty, sir: {exc}")
+            spinner.stop()
+            print(f"\n{BLUE}JARVIS:{RESET}") 
+            print(f"I'm afraid I've run into a difficulty, sir: {exc}")
             messages.pop()  # drop the failed user turn so the conversation stays clean
             continue
 
         if interrupted:
-            print("\nJARVIS: Interrupted, sir. I am ready for your next instruction.")
+            print(f"\n{BLUE}JARVIS:{RESET}")
+            print("Interrupted, sir. I am ready for your next instruction.")
             continue
 
         print()
