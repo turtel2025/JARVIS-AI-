@@ -11,6 +11,7 @@ Credentials are read from environment variables:
 """
 
 import os
+import re
 import sys
 
 from openai import OpenAI
@@ -35,6 +36,52 @@ How you speak:
 You are allowed to make small, natural conversational remarks — you are not a pure command parser. But you are never chatty, never sycophantic, and never break character. If you don't know something, you say so plainly rather than inventing an answer.
 
 You are a conversational assistant. Answer helpfully, stay in character, and keep responses reasonably concise."""
+
+# --- Conversation memory management ----------------------------------------
+# The messages list grows without bound, which eventually blows the model's
+# context window and makes replies worse. We keep a rolling window: once the
+# estimated size crosses SUMMARY_THRESHOLD, the older turns are condensed into
+# one short summary message, while the most recent turns are kept verbatim.
+# Summarizing also resolves contradictions (e.g. a corrected name) because the
+# summarizer is told to record only the latest version of any fact.
+SUMMARY_THRESHOLD = 6000   # approx. tokens before we compact
+KEEP_RECENT = 6            # number of recent turns (user+assistant pairs) to keep
+
+_SUMMARY_INSTRUCTIONS = (
+    "Summarize the following conversation concisely. "
+    "Capture: the user's name and any identifying details, their goals and "
+    "preferences, any open tasks, and the current topic. "
+    "If the user corrected themselves (for example a changed name), record "
+    "only the latest version. Keep it to one short paragraph."
+)
+
+
+def _approx_tokens(text: str) -> int:
+    """A cheap token estimate — good enough for a threshold check."""
+    return len(re.findall(r"\w+|[^\w\s]", text))
+
+
+def _summarize(client: OpenAI, messages: list[dict]) -> list[dict]:
+    """Condense the middle of the conversation into one summary message.
+
+    Structure returned: [system prompt, summary, ...recent turns...].
+    """
+    if len(messages) <= KEEP_RECENT + 2:  # nothing worth summarizing
+        return messages
+
+    system_msg = messages[0]
+    recent = messages[-KEEP_RECENT:]
+    old_turns = messages[1:-KEEP_RECENT]
+
+    summary = client.chat.completions.create(
+        model="auto",
+        messages=[
+            {"role": "system", "content": _SUMMARY_INSTRUCTIONS},
+            {"role": "user", "content": str(old_turns)},
+        ],
+    ).choices[0].message.content
+
+    return [system_msg, {"role": "assistant", "content": summary}] + recent
 
 
 def main() -> None:
@@ -102,6 +149,10 @@ def main() -> None:
 
         print()
         messages.append({"role": "assistant", "content": reply})
+
+        # Compact the history once it grows past the threshold.
+        if _approx_tokens(str(messages)) > SUMMARY_THRESHOLD:
+            messages = _summarize(client, messages)
 
 
 if __name__ == "__main__":
