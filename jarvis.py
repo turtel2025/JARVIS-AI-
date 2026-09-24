@@ -52,11 +52,13 @@ def main() -> None:
     client = OpenAI(api_key=api_key, base_url=base_url)
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    print("JARVIS: Good evening, sir. I am at your service.")
+    print("\nJARVIS: Good evening, sir. I am at your service.")
 
     while True:
         try:
-            user = input("Sir: ").strip()
+            # Put the "Sir:" label on its own line, then read the message.
+            print("\nSir:")
+            user = input().strip()
         except (EOFError, KeyboardInterrupt):
             print("\nJARVIS: Very good, sir. I shall standby.")
             break
@@ -65,12 +67,12 @@ def main() -> None:
             continue
 
         if user.lower() in ("exit", "quit", "good night", "shutdown", "stand down"):
-            print("JARVIS: As you wish, sir. Good night.")
+            print("\nJARVIS: As you wish, sir. Good night.")
             break
 
         messages.append({"role": "user", "content": user})
 
-        print("JARVIS: ", end="", flush=True)
+        print("\nJARVIS:")
         reply = ""
         started = False
         try:
@@ -84,7 +86,7 @@ def main() -> None:
                     continue
                 delta = chunk.choices[0].delta.content or ""
                 # Drop leading whitespace/newlines the model sometimes emits so
-                # the reply starts cleanly on the same line as the "JARVIS:" tag.
+                # the reply starts cleanly on its own line.
                 if not started:
                     delta = delta.lstrip()
                     if delta:
